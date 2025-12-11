@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Regenerate the fonts list and the fonts thumbnails
-DIR="/var/www/onlyoffice/documentserver"
+DIR="/var/task/onlyoffice/documentserver"
 export LD_LIBRARY_PATH=$DIR/server/FileConverter/bin:$LD_LIBRARY_PATH
 
 # Start generate AllFonts.js, font thumbnails and font_selection.bin

@@ -67,17 +67,25 @@ RUN rm -rf /var/www/onlyoffice/documentserver-example && \
     rm -rf /var/www/onlyoffice/documentserver/server/welcome && \
     rm -rf /var/www/onlyoffice/documentserver/web-apps/apps
 
+# Move to an area that lambda is happy to invoke within
+RUN mkdir /var/task && mv /var/www/onlyoffice /var/task/onlyoffice
+
 # Setup script
 COPY setup.sh /app/setup.sh
 RUN chmod +x /app/setup.sh && /app/setup.sh
 
 # Download lambda script
-WORKDIR /app
+WORKDIR /var/task
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then FILE="bootstrap"; \
     elif [ "$ARCH" = "aarch64" ]; then FILE="bootstrap-arm64"; \
     else echo "Unsupported architecture: $ARCH" >&2; exit 1; fi && \
-    curl -L -o bootstrap https://github.com/jacobtread/onlyoffice-convert-lambda/releases/download/0.1.1/${FILE} && \
-    chmod +x /app/bootstrap
+    curl -L -o bootstrap https://github.com/jacobtread/onlyoffice-convert-lambda/releases/download/0.1.2/${FILE} && \
+    chmod +x /var/task/bootstrap
 
-CMD ["/app/bootstrap"]
+ENV X2T_PATH=/var/task/onlyoffice/documentserver/server/FileConverter/bin
+ENV X2T_FONTS_PATH=/var/task/onlyoffice/documentserver/fonts
+
+RUN chmod +x /var/task/onlyoffice/documentserver/server/FileConverter/bin/x2t
+
+CMD ["/var/task/bootstrap"]
