@@ -5,7 +5,7 @@ use std::{
 
 use aws_config::{BehaviorVersion, SdkConfig, meta::region::RegionProviderChain};
 use aws_sdk_s3::primitives::ByteStream;
-use lambda_http::{Body, Error, Request, Response};
+use lambda_http::{Body, Error, Request, Response, http::Method};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -23,11 +23,16 @@ const X2T_BIN: &str = "x2t";
 #[cfg(windows)]
 const X2T_BIN: &str = "x2t.exe";
 
-/// This is the main body for the function.
-/// Write your code inside it.
-/// There are some code example in the following URLs:
-/// - https://github.com/awslabs/aws-lambda-rust-runtime/tree/main/examples
 pub(crate) async fn function_handler(event: Request) -> Result<Response<Body>, Error> {
+    // Treat anything thats not a POST request as a status check
+    if event.method() != Method::POST {
+        let resp = Response::builder()
+            .status(204)
+            .body(().into())
+            .map_err(Box::new)?;
+        return Ok(resp);
+    }
+
     let aws_config = aws_config().await;
     let s3_client = aws_sdk_s3::Client::new(&aws_config);
 
@@ -156,12 +161,11 @@ pub(crate) async fn function_handler(event: Request) -> Result<Response<Body>, E
         return Ok(resp);
     }
 
-    // Return something that implements IntoResponse.
-    // It will be serialized to the right response event automatically by the runtime
     let resp = Response::builder()
-        .status(200)
+        .status(204)
         .body(().into())
         .map_err(Box::new)?;
+
     Ok(resp)
 }
 

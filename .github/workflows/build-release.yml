@@ -39,7 +39,7 @@ jobs:
 
             # Compile the lambda binaries
             - name: Build lambda binaries
-              run: cargo lambda build --output-format zip --release
+              run: cargo lambda build --release
 
             # Copy built binary to output directory
             - name: Copy binary to output
