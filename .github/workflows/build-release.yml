@@ -54,10 +54,50 @@ jobs:
                   name: bootstrap
                   path: bootstrap
 
+    build-arm:
+        name: Build
+        runs-on: ubuntu-latest
+        steps:
+            # Checkout the repo for building
+            - uses: actions/checkout@v4
+
+            # Setup rust for building the service
+            - name: Set up Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  toolchain: stable
+                  targets: ${{ matrix.target }}
+                  override: true
+
+            # Install zig for cargo lambda
+            - name: Install zig
+              run: pip3 install ziglang
+
+            # Install cargo lambda
+            - name: Install cargo-lambda
+              run: curl -fsSL https://cargo-lambda.info/install.sh | sh
+
+            # Compile the lambda binaries
+            - name: Build lambda binaries
+              run: cargo lambda build --arm64 --release
+
+            # Copy built binary to output directory
+            - name: Copy binary to output
+              run: |
+                  cp target/lambda/onlyoffice-convert-lambda/bootstrap bootstrap-arm64
+              shell: bash
+
+            # Upload the built artifacts
+            - name: Upload bootstrap
+              uses: actions/upload-artifact@v4
+              with:
+                  name: bootstrap-arm64
+                  path: bootstrap-arm64
+
     release:
         name: Create Release
         runs-on: ubuntu-latest
-        needs: [build]
+        needs: [build, build-arm]
 
         steps:
             # Checkout the repo
