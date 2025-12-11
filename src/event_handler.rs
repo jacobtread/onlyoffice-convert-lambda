@@ -189,6 +189,12 @@ async fn handle_request(event: LambdaEvent<Value>) -> Result<(), LambdaError> {
         {
             tracing::error!(?err, "failed to delete config file");
         }
+
+        if paths.temp_path.exists()
+            && let Err(err) = tokio::fs::remove_dir_all(paths.temp_path).await
+        {
+            tracing::error!(?err, "failed to remove converter temporary files");
+        }
     });
 
     result?;
