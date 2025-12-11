@@ -77,7 +77,7 @@ RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then FILE="bootstrap"; \
     elif [ "$ARCH" = "aarch64" ]; then FILE="bootstrap-arm64"; \
     else echo "Unsupported architecture: $ARCH" >&2; exit 1; fi && \
-    curl -L -o bootstrap https://github.com/jacobtread/onlyoffice-convert-lambda/releases/download/0.1.0/${FILE} && \
+    curl -L -o bootstrap https://github.com/jacobtread/onlyoffice-convert-lambda/releases/download/0.1.1/${FILE} && \
     chmod +x /app/bootstrap
 
 CMD ["/app/bootstrap"]
