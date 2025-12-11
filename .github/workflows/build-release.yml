@@ -15,7 +15,7 @@ permissions:
 
 jobs:
     build:
-        name: Build
+        name: Build x86_64
         runs-on: ubuntu-latest
         steps:
             # Checkout the repo for building
@@ -55,7 +55,7 @@ jobs:
                   path: bootstrap
 
     build-arm:
-        name: Build
+        name: Build ARM64
         runs-on: ubuntu-latest
         steps:
             # Checkout the repo for building
