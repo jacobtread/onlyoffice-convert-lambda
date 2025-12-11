@@ -151,12 +151,14 @@ async fn handle_request(event: LambdaEvent<Value>) -> Result<(), LambdaError> {
           <m_sFileFrom>{}</m_sFileFrom>
           <m_sFileTo>{}</m_sFileTo>
           <m_sFontDir>{}</m_sFontDir>
+          <m_sTempDir>{}</m_sTempDir>
           <m_nFormatTo>513</m_nFormatTo>
         </TaskQueueDataConvert>
         "#,
         paths.input_path.display(),
         paths.output_path.display(),
         fonts_path.display(),
+        paths.temp_path.display(),
     );
 
     let result = x2t(X2tInput {
@@ -364,6 +366,7 @@ struct ConvertRequest {
 struct ConvertTempPaths {
     config_path: PathBuf,
     input_path: PathBuf,
+    temp_path: PathBuf,
     output_path: PathBuf,
 }
 
@@ -490,6 +493,7 @@ fn create_convert_temp_paths(temp_dir: &Path) -> std::io::Result<ConvertTempPath
     let config_path = temp_dir.join(format!("tmp_native_config_{random_id}.xml"));
     let input_path = temp_dir.join(format!("tmp_native_input_{random_id}"));
     let output_path = temp_dir.join(format!("tmp_native_output_{random_id}.pdf"));
+    let temp_path = temp_dir.join(format!("tmp_native_temp_{random_id}"));
 
     // Make paths absolute
     let config_path = absolute(config_path)
@@ -498,11 +502,14 @@ fn create_convert_temp_paths(temp_dir: &Path) -> std::io::Result<ConvertTempPath
         .inspect_err(|err| tracing::error!(?err, "failed to make file path absolute (input)"))?;
     let output_path = absolute(output_path)
         .inspect_err(|err| tracing::error!(?err, "failed to make file path absolute (output)"))?;
+    let temp_path = absolute(temp_path)
+        .inspect_err(|err| tracing::error!(?err, "failed to make file path absolute (temp)"))?;
 
     Ok(ConvertTempPaths {
         config_path,
         input_path,
         output_path,
+        temp_path,
     })
 }
 
