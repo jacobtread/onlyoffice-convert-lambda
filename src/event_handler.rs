@@ -133,7 +133,7 @@ async fn handle_request(event: LambdaEvent<Value>) -> Result<(), LambdaError> {
     }
 
     // Create temporary path
-    let paths = create_convert_temp_paths(&temp_path).map_err(|err| {
+    let paths = create_convert_temp_paths(&temp_path).await.map_err(|err| {
         tracing::error!(?err, "failed to setup temporary paths");
         LambdaError {
             reason: Some("SETUP_TEMP_FAILED"),
@@ -491,7 +491,7 @@ async fn stream_output_file(
     Ok(())
 }
 
-fn create_convert_temp_paths(temp_dir: &Path) -> std::io::Result<ConvertTempPaths> {
+async fn create_convert_temp_paths(temp_dir: &Path) -> std::io::Result<ConvertTempPaths> {
     // Generate random unique ID
     let random_id = Uuid::new_v4().simple();
 
@@ -510,6 +510,11 @@ fn create_convert_temp_paths(temp_dir: &Path) -> std::io::Result<ConvertTempPath
         .inspect_err(|err| tracing::error!(?err, "failed to make file path absolute (output)"))?;
     let temp_path = absolute(temp_path)
         .inspect_err(|err| tracing::error!(?err, "failed to make file path absolute (temp)"))?;
+
+    // Ensure temporary path exists
+    if !temp_path.exists() {
+        tokio::fs::create_dir_all(&temp_path).await?;
+    }
 
     Ok(ConvertTempPaths {
         config_path,

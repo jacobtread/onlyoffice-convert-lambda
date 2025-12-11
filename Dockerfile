@@ -80,12 +80,21 @@ RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then FILE="bootstrap"; \
     elif [ "$ARCH" = "aarch64" ]; then FILE="bootstrap-arm64"; \
     else echo "Unsupported architecture: $ARCH" >&2; exit 1; fi && \
-    curl -L -o bootstrap https://github.com/jacobtread/onlyoffice-convert-lambda/releases/download/0.1.2/${FILE} && \
+    curl -L -o bootstrap https://github.com/jacobtread/onlyoffice-convert-lambda/releases/download/0.1.3/${FILE}?1 && \
     chmod +x /var/task/bootstrap
 
 ENV X2T_PATH=/var/task/onlyoffice/documentserver/server/FileConverter/bin
 ENV X2T_FONTS_PATH=/var/task/onlyoffice/documentserver/fonts
 
+COPY mount /var/task/onlyoffice/documentserver/server/FileConverter/bin/mount
+
 RUN chmod +x /var/task/onlyoffice/documentserver/server/FileConverter/bin/x2t
 
-CMD ["/var/task/bootstrap"]
+RUN dnf -y install strace
+
+RUN strace -f -o /tmp/x2t_trace.log /var/task/onlyoffice/documentserver/server/FileConverter/bin/x2t /var/task/onlyoffice/documentserver/server/FileConverter/bin/mount/config.xml
+
+ENTRYPOINT [ "sleep", "infinity" ]
+
+# ENTRYPOINT ["/var/task/bootstrap"]
+# ENTRYPOINT ["/var/task/onlyoffice/documentserver/server/FileConverter/bin/x2t", "/var/task/onlyoffice/documentserver/server/FileConverter/bin/mount/config.xml"]
