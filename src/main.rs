@@ -1,6 +1,6 @@
-use lambda_http::{Error, run, service_fn, tracing};
-mod http_handler;
-use http_handler::function_handler;
+use lambda_runtime::{Error, run, service_fn, tracing};
+mod event_handler;
+use event_handler::function_handler;
 mod encrypted;
 
 #[tokio::main]

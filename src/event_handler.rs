@@ -5,8 +5,9 @@ use std::{
 
 use aws_config::{BehaviorVersion, SdkConfig, meta::region::RegionProviderChain};
 use aws_sdk_s3::primitives::ByteStream;
-use lambda_http::{Body, Error, Request, Response, http::Method};
+use lambda_runtime::LambdaEvent;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::Command,
@@ -23,21 +24,35 @@ const X2T_BIN: &str = "x2t";
 #[cfg(windows)]
 const X2T_BIN: &str = "x2t.exe";
 
-pub(crate) async fn function_handler(event: Request) -> Result<Response<Body>, Error> {
-    // Treat anything thats not a POST request as a status check
-    if event.method() != Method::POST {
-        let resp = Response::builder()
-            .status(204)
-            .body(().into())
-            .map_err(Box::new)?;
-        return Ok(resp);
+#[derive(Serialize)]
+pub struct Output {
+    success: bool,
+}
+
+pub(crate) async fn function_handler(
+    event: LambdaEvent<Value>,
+) -> Result<Output, lambda_runtime::Error> {
+    if let Err(error) = handle_request(event).await {
+        let error_json = serde_json::to_string(&error)?;
+        return Err(lambda_runtime::Error::from(error_json));
     }
+
+    Ok(Output { success: true })
+}
+
+async fn handle_request(event: LambdaEvent<Value>) -> Result<(), LambdaError> {
+    let request: ConvertRequest = serde_json::from_value(event.payload).map_err(|err| {
+        tracing::error!(?err, "failed to parse request");
+
+        LambdaError {
+            reason: Some("PARSE_REQUEST"),
+            x2t_code: None,
+            message: "failed to parse convert request".to_string(),
+        }
+    })?;
 
     let aws_config = aws_config().await;
     let s3_client = aws_sdk_s3::Client::new(&aws_config);
-
-    let body = event.body();
-    let request: ConvertRequest = serde_json::from_slice(body)?;
 
     let mut x2t_path: Option<PathBuf> = None;
     let mut fonts_path: Option<PathBuf> = None;
@@ -71,7 +86,15 @@ pub(crate) async fn function_handler(event: Request) -> Result<Response<Body>, E
 
     // Check a path was provided
     let x2t_path = match x2t_path {
-        Some(value) => absolute(value)?,
+        Some(value) => absolute(value).map_err(|err| {
+            tracing::error!(?err, "failed to make x2t path absolute");
+
+            LambdaError {
+                reason: Some("X2T_PATH_ABSOLUTE"),
+                x2t_code: None,
+                message: "failed to make x2t path absolute".to_string(),
+            }
+        })?,
         None => {
             tracing::error!("no x2t install path provided, cannot start server");
             panic!();
@@ -79,7 +102,15 @@ pub(crate) async fn function_handler(event: Request) -> Result<Response<Body>, E
     };
 
     let fonts_path = match fonts_path {
-        Some(value) => absolute(value)?,
+        Some(value) => absolute(value).map_err(|err| {
+            tracing::error!(?err, "failed to make fonts path absolute");
+
+            LambdaError {
+                reason: Some("X2T_FONTS_PATH_ABSOLUTE"),
+                x2t_code: None,
+                message: "failed to make x2t fonts path absolute".to_string(),
+            }
+        })?,
         None => {
             tracing::error!("no fonts path provided, cannot start server");
             panic!();
@@ -92,14 +123,23 @@ pub(crate) async fn function_handler(event: Request) -> Result<Response<Body>, E
     if !temp_path.exists() {
         tokio::fs::create_dir_all(&temp_path).await.map_err(|err| {
             tracing::error!(?err, "failed to create temporary directory");
-            std::io::Error::other("failed to create temporary directory")
+
+            LambdaError {
+                reason: Some("SETUP_TEMP_DIR_FAILED"),
+                x2t_code: None,
+                message: "failed to create temporary directory".to_string(),
+            }
         })?;
     }
 
     // Create temporary path
     let paths = create_convert_temp_paths(&temp_path).map_err(|err| {
         tracing::error!(?err, "failed to setup temporary paths");
-        std::io::Error::other("failed to setup temporary file paths")
+        LambdaError {
+            reason: Some("SETUP_TEMP_FAILED"),
+            x2t_code: None,
+            message: "failed to setup temporary file paths".to_string(),
+        }
     })?;
 
     // Generate the convert config
@@ -149,24 +189,9 @@ pub(crate) async fn function_handler(event: Request) -> Result<Response<Body>, E
         }
     });
 
-    if let Err(error) = result {
-        let body = serde_json::to_string(&error)?;
-        // Return something that implements IntoResponse.
-        // It will be serialized to the right response event automatically by the runtime
-        let resp = Response::builder()
-            .status(500)
-            .header("content-type", "application/json")
-            .body(body.into())
-            .map_err(Box::new)?;
-        return Ok(resp);
-    }
+    result?;
 
-    let resp = Response::builder()
-        .status(204)
-        .body(().into())
-        .map_err(Box::new)?;
-
-    Ok(resp)
+    Ok(())
 }
 
 struct X2tInput<'a> {
@@ -177,7 +202,7 @@ struct X2tInput<'a> {
     x2t_path: &'a Path,
 }
 
-async fn x2t(input: X2tInput<'_>) -> Result<(), ErrorResponse> {
+async fn x2t(input: X2tInput<'_>) -> Result<(), LambdaError> {
     tracing::debug!("writing config file");
 
     // Write the config file to disk
@@ -185,7 +210,7 @@ async fn x2t(input: X2tInput<'_>) -> Result<(), ErrorResponse> {
         .await
         .map_err(|err| {
             tracing::error!(?err, "failed to write config file");
-            ErrorResponse {
+            LambdaError {
                 reason: Some("WRITE_CONFIG_FILE"),
                 x2t_code: None,
                 message: "failed to write config file".to_string(),
@@ -220,7 +245,7 @@ async fn x2t(input: X2tInput<'_>) -> Result<(), ErrorResponse> {
         .await
         .map_err(|err| {
             tracing::error!(?err, "failed to run x2t");
-            ErrorResponse {
+            LambdaError {
                 reason: Some("RUN_X2T"),
                 x2t_code: None,
                 message: "failed to run x2t".to_string(),
@@ -244,7 +269,7 @@ async fn x2t(input: X2tInput<'_>) -> Result<(), ErrorResponse> {
             .map_err(|err| {
                 tracing::error!(?err, "failed to open input file for integrity check");
 
-                ErrorResponse {
+                LambdaError {
                     reason: Some("OPEN_FILE_INTEGRITY"),
                     x2t_code: None,
                     message: "failed to open input file for integrity check".to_string(),
@@ -261,7 +286,7 @@ async fn x2t(input: X2tInput<'_>) -> Result<(), ErrorResponse> {
                 .map_err(|err| {
                     tracing::error!(?err, "failed to read input file for integrity check");
 
-                    ErrorResponse {
+                    LambdaError {
                         reason: Some("READ_FILE_INTEGRITY"),
                         x2t_code: None,
                         message: "failed to read input file for integrity check".to_string(),
@@ -286,7 +311,7 @@ async fn x2t(input: X2tInput<'_>) -> Result<(), ErrorResponse> {
 
         // Assume encryption for out of range crashes
         if stderr.contains("std::out_of_range") {
-            return Err(ErrorResponse {
+            return Err(LambdaError {
                 reason: Some("FILE_LIKELY_ENCRYPTED"),
                 x2t_code: error_code,
                 message: "file is encrypted".to_string(),
@@ -294,17 +319,17 @@ async fn x2t(input: X2tInput<'_>) -> Result<(), ErrorResponse> {
         }
 
         return Err(match file_condition {
-            FileCondition::LikelyCorrupted => ErrorResponse {
+            FileCondition::LikelyCorrupted => LambdaError {
                 reason: Some("FILE_LIKELY_CORRUPTED"),
                 x2t_code: error_code,
                 message: "file is corrupted".to_string(),
             },
-            FileCondition::LikelyEncrypted => ErrorResponse {
+            FileCondition::LikelyEncrypted => LambdaError {
                 reason: Some("FILE_LIKELY_ENCRYPTED"),
                 x2t_code: error_code,
                 message: "file is encrypted".to_string(),
             },
-            _ => ErrorResponse {
+            _ => LambdaError {
                 reason: None,
                 x2t_code: error_code,
                 message: message.to_string(),
@@ -348,7 +373,7 @@ async fn stream_source_file(
     source_bucket: String,
     source_key: String,
     file_path: &Path,
-) -> Result<(), ErrorResponse> {
+) -> Result<(), LambdaError> {
     let response = match s3_client
         .get_object()
         .bucket(source_bucket)
@@ -364,14 +389,14 @@ async fn stream_source_file(
                 .as_service_error()
                 .is_some_and(|value| value.is_no_such_key())
             {
-                return Err(ErrorResponse {
+                return Err(LambdaError {
                     reason: Some("NO_SUCH_KEY"),
                     x2t_code: None,
                     message: "key not found in source bucket".to_string(),
                 });
             }
 
-            return Err(ErrorResponse {
+            return Err(LambdaError {
                 reason: Some("GET_OBJECT"),
                 x2t_code: None,
                 message: err.to_string(),
@@ -383,7 +408,7 @@ async fn stream_source_file(
 
     let mut file = tokio::fs::File::create(file_path).await.map_err(|err| {
         tracing::error!(?err, "failed to create source file");
-        ErrorResponse {
+        LambdaError {
             reason: Some("GET_OBJECT"),
             x2t_code: None,
             message: err.to_string(),
@@ -393,7 +418,7 @@ async fn stream_source_file(
     while let Some(chunk_result) = body.next().await {
         let chunk = chunk_result.map_err(|err| {
             tracing::error!(?err, "failed to read object chunk");
-            ErrorResponse {
+            LambdaError {
                 reason: Some("READ_OBJECT_CHUNK"),
                 x2t_code: None,
                 message: "failed to read chunk".to_string(),
@@ -402,7 +427,7 @@ async fn stream_source_file(
 
         file.write_all(&chunk).await.map_err(|err| {
             tracing::error!(?err, "failed to write object chunk");
-            ErrorResponse {
+            LambdaError {
                 reason: Some("WRITE_OBJECT_CHUNK"),
                 x2t_code: None,
                 message: "failed to write chunk".to_string(),
@@ -412,7 +437,7 @@ async fn stream_source_file(
 
     file.flush().await.map_err(|err| {
         tracing::error!(?err, "failed to flush object");
-        ErrorResponse {
+        LambdaError {
             reason: Some("FLUSH_OBJECT"),
             x2t_code: None,
             message: "failed to flush object".to_string(),
@@ -428,10 +453,10 @@ async fn stream_output_file(
     dest_bucket: String,
     dest_key: String,
     file_path: &Path,
-) -> Result<(), ErrorResponse> {
+) -> Result<(), LambdaError> {
     let byte_stream = ByteStream::from_path(file_path).await.map_err(|err| {
         tracing::error!(?err, "failed to create output stream");
-        ErrorResponse {
+        LambdaError {
             reason: Some("CREATE_OUTPUT_STREAM"),
             x2t_code: None,
             message: "failed to create output stream".to_string(),
@@ -447,7 +472,7 @@ async fn stream_output_file(
         .await
         .map_err(|err| {
             tracing::error!(?err, "failed to upload output");
-            ErrorResponse {
+            LambdaError {
                 reason: Some("UPLOAD_OUTPUT_STREAM"),
                 x2t_code: None,
                 message: "failed to upload output stream".to_string(),
@@ -495,8 +520,8 @@ pub async fn aws_config() -> SdkConfig {
         .await
 }
 
-#[derive(Serialize)]
-pub struct ErrorResponse {
+#[derive(Serialize, Debug)]
+pub struct LambdaError {
     pub reason: Option<&'static str>,
     pub x2t_code: Option<i32>,
     pub message: String,
